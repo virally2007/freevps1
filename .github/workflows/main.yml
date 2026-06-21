@@ -17,7 +17,8 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
 
           # Remove any existing rule with the same name to avoid duplication
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          # (prints "No rules match the specified criteria" on first run - harmless, suppressed below)
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
 
           # Only allow RDP from the Tailscale CGNAT range (100.64.0.0/10), not the whole internet
           netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
@@ -30,6 +31,20 @@ jobs:
         run: |
           if (-not $env:RDP_PASSWORD) {
               Write-Error "RDP_PASSWORD secret is not set. Add it under Settings > Secrets and variables > Actions, then re-run."
+              exit 1
+          }
+
+          # Windows local accounts require 8+ chars and at least 3 of: upper, lower, digit, special.
+          # Checking this ourselves gives a readable error instead of a bare InvalidPasswordException.
+          $pwd = $env:RDP_PASSWORD
+          $categories = 0
+          if ($pwd -cmatch '[A-Z]') { $categories++ }
+          if ($pwd -cmatch '[a-z]') { $categories++ }
+          if ($pwd -match '[0-9]') { $categories++ }
+          if ($pwd -match '[^a-zA-Z0-9]') { $categories++ }
+
+          if ($pwd.Length -lt 8 -or $categories -lt 3) {
+              Write-Error "RDP_PASSWORD does not meet Windows complexity requirements (8+ characters, at least 3 of: uppercase, lowercase, digit, special character). Update the secret and re-run."
               exit 1
           }
 
